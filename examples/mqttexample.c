@@ -44,6 +44,10 @@ static const char* mTlsCertFile;
 static const char* mTlsKeyFile;
 #endif
 
+
+#ifndef AZURE_SPHERE
+
+
 static int mygetopt(int argc, char** argv, const char* optstring)
 {
     static char* next = NULL;
@@ -216,11 +220,15 @@ void mqtt_show_usage(MQTTCtx* mqttCtx)
     }
 }
 
+#endif
+
 void mqtt_init_ctx(MQTTCtx* mqttCtx)
 {
     XMEMSET(mqttCtx, 0, sizeof(MQTTCtx));
     mqttCtx->host = DEFAULT_MQTT_HOST;
+    mqttCtx->port = DEFAULT_MQTT_SECURE_PORT;
     mqttCtx->qos = DEFAULT_MQTT_QOS;
+    mqttCtx->use_tls = 1;
     mqttCtx->clean_session = 1;
     mqttCtx->keep_alive_sec = DEFAULT_KEEP_ALIVE_SEC;
     mqttCtx->client_id = kDefClientId;
@@ -232,6 +240,8 @@ void mqtt_init_ctx(MQTTCtx* mqttCtx)
     mqttCtx->topic_alias_max = 1;
 #endif
 }
+
+#ifndef AZURE_SPHERE
 
 int mqtt_parse_args(MQTTCtx* mqttCtx, int argc, char** argv)
 {
@@ -386,6 +396,8 @@ int mqtt_parse_args(MQTTCtx* mqttCtx, int argc, char** argv)
     return rc;
 }
 
+#endif // AZURE_SPHERE
+
 void mqtt_free_ctx(MQTTCtx* mqttCtx)
 {
     if (mqttCtx == NULL) {
@@ -471,7 +483,9 @@ int mqtt_check_timeout(int rc, word32* start_sec, word32 timeout_sec)
 #endif /* WOLFMQTT_NONBLOCK */
 
 
-#ifdef ENABLE_MQTT_TLS
+
+#if defined(ENABLE_MQTT_TLS) && !defined(AZURE_SPHERE)
+
 static int mqtt_tls_verify_cb(int preverify, WOLFSSL_X509_STORE_CTX* store)
 {
     char buffer[WOLFSSL_MAX_ERROR_SZ];
@@ -571,9 +585,84 @@ int mqtt_tls_cb(MqttClient* client)
     return rc;
 }
 #else
+
+#if defined(ENABLE_MQTT_TLS) && defined(AZURE_SPHERE)
+
+#include <applibs/storage.h>
+#include <applibs/log.h>
+
+int mqtt_tls_cb(MqttClient* client) {
+    int ret;
+    char* abs_path = NULL;
+    int rc = WOLFSSL_FAILURE;
+
+    client->tls.ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
+    if (client->tls.ctx == NULL) {
+        return WOLFSSL_FAILURE;
+    }
+
+    /* Load root CA certificates full path */
+    abs_path = Storage_GetAbsolutePathInImagePackage(MQTT_CA_CERTIFICATE);
+    if (abs_path) {
+        rc = wolfSSL_CTX_load_verify_locations(client->tls.ctx, abs_path, NULL);
+        if (rc != WOLFSSL_SUCCESS) {
+            free(abs_path);
+            abs_path = NULL;
+
+            //Log_Debug("Error loading CA %s: %d", mTlsCaFile, rc);
+            return rc;
+        }
+        free(abs_path);
+        abs_path = NULL;
+    }
+
+    abs_path = Storage_GetAbsolutePathInImagePackage(MQTT_CLIENT_PRIVATE_KEY);
+    if (abs_path == NULL) {
+        Log_Debug("ERROR: the private key path could not be resolved\n");
+        return WOLFSSL_FAILURE;
+    }
+
+    ret = wolfSSL_CTX_use_PrivateKey_file(client->tls.ctx, abs_path, WOLFSSL_FILETYPE_PEM);
+    if (ret != WOLFSSL_SUCCESS) {
+        Log_Debug("ERROR: failed to private key certificate\n");
+        free(abs_path);
+        abs_path = NULL;
+        return WOLFSSL_FAILURE;
+    }
+
+    free(abs_path);
+    abs_path = NULL;
+
+
+    abs_path = Storage_GetAbsolutePathInImagePackage(MQTT_CLIENT_CERTIFICATE);
+    if (abs_path == NULL) {
+        Log_Debug("ERROR: the client certificate path could not be resolved\n");
+        return WOLFSSL_FAILURE;
+    }
+
+    ret = wolfSSL_CTX_use_certificate_file(client->tls.ctx, abs_path, WOLFSSL_FILETYPE_PEM);
+    if (ret != WOLFSSL_SUCCESS) {
+        Log_Debug("ERROR: failed to client certificate\n");
+        free(abs_path);
+        abs_path = NULL;
+        return WOLFSSL_FAILURE;
+    }
+
+    free(abs_path);
+    abs_path = NULL;
+
+    return WOLFSSL_SUCCESS;
+}
+
+#else
+
 int mqtt_tls_cb(MqttClient* client)
 {
     (void)client;
     return 0;
 }
+#endif // ENABLE_MQTT_TLS && AZURE_SPHERE
+
 #endif /* ENABLE_MQTT_TLS */
+
+

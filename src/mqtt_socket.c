@@ -48,6 +48,9 @@ int MqttSocket_TlsSocketReceive(WOLFSSL* ssl, char *buf, int sz,
     void *ptr)
 {
     int rc;
+
+#ifndef AZURE_SPHERE
+
     MqttClient *client = (MqttClient*)ptr;
     (void)ssl; /* Not used */
 
@@ -64,6 +67,9 @@ int MqttSocket_TlsSocketReceive(WOLFSSL* ssl, char *buf, int sz,
     else if (rc < 0) {
         rc = WOLFSSL_CBIO_ERR_GENERAL;
     }
+
+#endif // AZURE_SPHERE
+
     return rc;
 }
 
@@ -71,6 +77,9 @@ int MqttSocket_TlsSocketSend(WOLFSSL* ssl, char *buf, int sz,
     void *ptr)
 {
     int rc;
+
+#ifndef AZURE_SPHERE
+
     MqttClient *client = (MqttClient*)ptr;
     (void)ssl; /* Not used */
 
@@ -86,6 +95,9 @@ int MqttSocket_TlsSocketSend(WOLFSSL* ssl, char *buf, int sz,
     else if (rc < 0) {
         rc = WOLFSSL_CBIO_ERR_GENERAL;
     }
+
+#endif // AZURE_SPHERE
+
     return rc;
 }
 #endif
@@ -314,6 +326,45 @@ int MqttSocket_Peek(MqttClient *client, byte* buf, int buf_len, int timeout_ms)
 }
 #endif
 
+
+#if defined(ENABLE_MQTT_TLS) && defined(AZURE_SPHERE)
+
+// NOTE THIS API ASSUMES FD FIRST ITEM IN STRUCT AND TYPE INT
+
+//typedef struct _SocketContext {
+//    int fd;
+//    NB_Stat stat;
+//    SOCK_ADDR_IN addr;
+//#ifdef MICROCHIP_MPLAB_HARMONY
+//    word32 bytes;
+//#endif
+//#if defined(WOLFMQTT_MULTITHREAD) && defined(WOLFMQTT_ENABLE_STDIN_CAP)
+//    /* "self pipe" -> signal wake sleep() */
+//    SOCKET_T pfd[2];
+//#endif
+//    MQTTCtx* mqttCtx;
+//} SocketContext;
+
+/// <summary>
+/// Added as missing API on Azure Sphere wolfSSL
+/// </summary>
+/// <param name="ssl"></param>
+/// <param name="context"></param>
+/// <returns></returns>
+int wolfSSL_SetCertCbCtx(WOLFSSL* ssl, void* context) {
+
+    int rc = 0;
+    // THIS ASSUMES FD WILL REMAIN THE FIRST ITEM IN THE SocketContext object
+    int fd = *(int*)context;
+
+    // Associate socket with wolfSSL session.
+    rc = wolfSSL_set_fd(ssl, fd);
+
+    return rc;
+}
+
+#endif // AZURE_SPHERE
+
 int MqttSocket_Connect(MqttClient *client, const char* host, word16 port,
     int timeout_ms, int use_tls, MqttTlsCb cb)
 {
@@ -368,6 +419,8 @@ int MqttSocket_Connect(MqttClient *client, const char* host, word16 port,
             }
         }
 
+#ifndef AZURE_SPHERE
+
         /* Create and initialize the WOLFSSL_CTX structure */
         if (client->tls.ctx == NULL) {
             /* Use defaults */
@@ -382,6 +435,7 @@ int MqttSocket_Connect(MqttClient *client, const char* host, word16 port,
     #ifndef NO_DH
         wolfSSL_CTX_SetMinDhKey_Sz(client->tls.ctx, WOLF_TLS_DHKEY_BITS_MIN);
     #endif
+
 
         /* Setup the IO callbacks */
         wolfSSL_CTX_SetIORecv(client->tls.ctx, MqttSocket_TlsSocketReceive);
@@ -408,6 +462,44 @@ int MqttSocket_Connect(MqttClient *client, const char* host, word16 port,
         if (rc != WOLFSSL_SUCCESS) {
             goto exit;
         }
+
+#else
+
+        if (client->tls.ssl == NULL) {
+            client->tls.ssl = wolfSSL_new(client->tls.ctx);
+
+            if (client->tls.ssl == NULL) {
+                rc = -1;
+                goto exit;
+            }
+        }
+
+        // Added as missing API
+        wolfSSL_SetCertCbCtx(client->tls.ssl, client->net->context);
+
+#ifndef WOLFMQTT_NONBLOCK
+
+        rc = wolfSSL_connect(client->tls.ssl);
+        if (rc != WOLFSSL_SUCCESS) {
+            goto exit;
+        }
+
+#else
+        int err;
+
+        /* Connect to wolfSSL on the server side, poll for non-blocking socket */
+        do {
+            rc = wolfSSL_connect(client->tls.ssl);
+            err = wolfSSL_get_error(client->tls.ssl, rc);
+        } while (err == WOLFSSL_ERROR_WANT_READ || err == WOLFSSL_ERROR_WANT_WRITE);
+
+        if (rc != WOLFSSL_SUCCESS) {
+            goto exit;
+        }
+
+#endif // WOLFMQTT_NONBLOCK
+
+#endif // AZURE_SPHERE
 
         client->flags |= MQTT_CLIENT_FLAG_IS_TLS;
         rc = MQTT_CODE_SUCCESS;

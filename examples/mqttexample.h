@@ -73,6 +73,10 @@
 #define PRINT_BUFFER_SIZE       80
 #define DEFAULT_MESSAGE         "test"
 
+#ifdef AZURE_SPHERE
+#define PRINTF Log_Debug
+#endif // AZURE_SPHERE
+
 #ifdef WOLFMQTT_V5
 #define DEFAULT_MAX_PKT_SZ      768 /* The max MQTT control packet size the
                                        client is willing to accept. */
