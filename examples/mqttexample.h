@@ -74,7 +74,13 @@
 #define DEFAULT_MESSAGE         "test"
 
 #ifdef AZURE_SPHERE
+
+#ifdef PRINTF
+#undef PRINTF
+#endif // PRINTF
+
 #define PRINTF Log_Debug
+
 #endif // AZURE_SPHERE
 
 #ifdef WOLFMQTT_V5
