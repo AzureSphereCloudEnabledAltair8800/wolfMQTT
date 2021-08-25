@@ -47,7 +47,7 @@
 int MqttSocket_TlsSocketReceive(WOLFSSL* ssl, char *buf, int sz,
     void *ptr)
 {
-    int rc;
+    int rc = 0;
 
 #ifndef AZURE_SPHERE
 
@@ -76,7 +76,7 @@ int MqttSocket_TlsSocketReceive(WOLFSSL* ssl, char *buf, int sz,
 int MqttSocket_TlsSocketSend(WOLFSSL* ssl, char *buf, int sz,
     void *ptr)
 {
-    int rc;
+    int rc = 0;
 
 #ifndef AZURE_SPHERE
 
